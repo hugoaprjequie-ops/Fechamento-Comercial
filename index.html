@@ -14,9 +14,9 @@
   .toolbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 14px;background:#fff;border-bottom:1px solid #ccd}
   .toolbar label{font-size:12px;color:#445}
   .toolbar input[type=date],.toolbar select{padding:4px 6px;font-size:12px}
-  .toolbar .file{font-size:12px}
   .chip{margin-left:auto;padding:4px 10px;border-radius:12px;font-size:12px;background:#fff3cd;color:#7a5b00}
   .chip.ok{background:#d9f2e0;color:#136b2c}
+  .chip.err{background:#f8d7da;color:#721c24}
   .scroll{overflow-x:auto;padding:14px}
   .sheet{background:#fff;width:100%;min-width:1040px;max-width:1100px;margin:0 auto;padding:12px 12px 20px;box-shadow:0 1px 6px rgba(0,0,0,.15)}
   .top{display:flex;justify-content:space-between;font-weight:bold;font-size:12px;margin-bottom:10px}
@@ -63,54 +63,33 @@
   <label>Unidade: <select id="unidade"></select></label>
   <label>Visão: <select id="visao"></select></label>
   <label>Categorias por GV/setor: <select id="basecat"><option value="dia">VOL DIA</option><option value="tt">VOL TT (dia + buffer)</option></select></label>
-  <label class="file">Cora Pedidos (.csv): <input type="file" id="fCora" accept=".csv,.txt"></label>
-  <label class="file">BASE (.csv): <input type="file" id="fBase" accept=".csv,.txt"></label>
-  <label class="file">030237 (.csv): <input type="file" id="fBoni" accept=".csv,.txt"></label>
-  <span class="chip" id="status">Dados de demonstração</span>
+  <span class="chip" id="status">A carregar dados do GitHub...</span>
 </div>
 
 <div class="scroll"><div class="sheet" id="sheet"></div></div>
 <details id="diag"><summary>Conferência dos dados</summary><pre id="diagOut"></pre></details>
 
 <script>
-/* =====================================================================
-   CONFIGURAÇÃO — regras de cálculo. Ajuste aqui se algo não bater
-   com a planilha atual.
-   ===================================================================== */
 const CONFIG = {
   revenda: 'GP7 - JEQUIÉ',
   codigo: '1027247',
-
-  // Unidades de venda (coluna "Cód. unidade venda" do Cora Pedidos)
-  // Cada unidade tem a sua própria estrutura de GVs (faixas de setor)
   unidades: [
     {cod:'1027247', nome:'GP7 - JEQUIÉ',     gvs:[ {nome:'GV 1', de:101, ate:109}, {nome:'GV 2', de:201, ate:208} ]},
     {cod:'1043293', nome:'GP7 - ITAPETINGA', gvs:[ {nome:'GV 1', de:101, ate:110} ]}
   ],
-
-  // Ficheiros carregados automaticamente da raiz do servidor/GitHub
   arquivoCora: 'Pedidos_1027247.csv',
   arquivoBoni: '03.02.37_1027247.csv',
   arquivoBase: 'Base.csv',
 
   campoHecto: 'VOLUME HECTOLITRO',
-  campoValor: 'VALOR TOTAL',             // faturamento (com ADF)
-  campoValorFalta: 'VALOR LIQUIDO ITEM', // igual à coluna FALTA PRODUTO da planilha (coluna AB)
+  campoValor: 'VALOR TOTAL',
+  campoValorFalta: 'VALOR LIQUIDO ITEM',
 
   ignorarPedido: r => /CANCEL/.test(norm(r['SITUACAO PEDIDO'])),
-
-  // Item em falta: mesma regra da coluna FALTA PRODUTO da planilha (Situação atend. item = FALTA)
   ehFaltaItem: r => norm(r['SITUACAO ATEND. ITEM']) === 'FALTA',
-
-  // Buffer quando "Tipo buffer" tem conteúdo
   ehBuffer: r => !['','NAO','N','0','-','NENHUM'].includes(norm(r['TIPO BUFFER'])),
-
-  // Bonificação do dia
   ehBonif: r => /BONIF/.test(norm(r['DESC. TIPO MOVIMENTO']) + ' ' + norm(r['TIPO PEDIDO'])),
-
-  // Venda feita pelo BEES
   ehBees: r => /BEES/.test(norm(r['CANAL ORIGEM']) + ' ' + norm(r['TIPO CANAL ORIGEM'])),
-
   ehRGB: r => /RGB/.test(norm(r['CESTA EMBALAGEM'])),
   ehOW:  r => /\bOW\b/.test(norm(r['CESTA EMBALAGEM'])),
   ehHE:  r => norm(r['CESTA HE']) !== ''
@@ -118,7 +97,6 @@ const CONFIG = {
 
 const CATS = ['CERVEJA','REFRIGENANC','MKTPLACE','AGUA'];
 
-/* ---------- Dados de demonstração (valores da planilha de 05/11/2026) ---------- */
 const DEMO = {
   data: '2026-11-05',
   cats: {
@@ -145,7 +123,6 @@ const DEMO = {
   ]
 };
 
-/* ---------- Utilitários ---------- */
 function norm(s){ return (s==null?'':String(s)).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().trim(); }
 function chave(v){ const s=String(v==null?'':v).trim(); return /^\d+$/.test(s) ? String(parseInt(s,10)) : norm(s); }
 function num(v){
@@ -188,9 +165,6 @@ function parseCSV(text){
   });
 }
 
-/* ---------- BASE: Tipo Marca, Cesta Embalagem, Cesta HE ----------
-   Colunas da BASE (por posição): A=Código, C=Tipo Marca, D=Embalagem,
-   G:H=Embalagem→Tipo (RGB), J:K=Tipo/SKU→Cesta, M:N=SKU→HE            */
 function buildBase(rows){
   const B = {prod:new Map(), cesta:new Map(), embTipo:new Map(), he:new Set()};
   rows.slice(1).forEach(r=>{
@@ -202,7 +176,7 @@ function buildBase(rows){
   });
   return B;
 }
-// Replica as 3 fórmulas da planilha (TIPO MARCA, CESTA EMBALAGEM, CESTA HE)
+
 function derivar(r, cod, B){
   const k = chave(cod), p = B.prod.get(k);
   let cesta = '';
@@ -213,16 +187,15 @@ function derivar(r, cod, B){
   r['CESTA HE'] = B.he.has(k) ? 'HE' : '';
 }
 
-/* ---------- Estado e elementos ---------- */
-const state = {cora:null, boni:null, base:null, pedSetor:new Map()};
+const state = {cora:null, boni:null, base:null, pedSetor:new Map(), statusLeitura:{cora:false, base:false, boni:false}};
 const el = {data:document.getElementById('data'), status:document.getElementById('status'),
   sheet:document.getElementById('sheet'), diag:document.getElementById('diagOut'),
   visao:document.getElementById('visao'), basecat:document.getElementById('basecat'),
   unidade:document.getElementById('unidade')};
 
 function unidadeAtual(){ return CONFIG.unidades.find(x=>chave(x.cod)===chave(el.unidade.value)) || null; }
-// GVs da unidade selecionada (em "Todas" não há filtro por GV: os setores se repetem entre as unidades)
 function gvsAtuais(){ const u = unidadeAtual(); return u ? u.gvs : []; }
+
 function montarVisao(){
   const anterior = el.visao.value;
   let h = '<option value="todos">Todos</option>';
@@ -236,6 +209,7 @@ function montarVisao(){
   el.visao.value = anterior;
   if (!el.visao.value) el.visao.value = 'todos';
 }
+
 function passaUnidade(cod){
   const u = el.unidade.value;
   return u==='todas' || chave(cod)===chave(u);
@@ -243,6 +217,7 @@ function passaUnidade(cod){
 
 function categoria(r){ const t = norm(r['TIPO MARCA']); return CATS.includes(t) ? t : 'OUTROS'; }
 function setorDe(r){ const m = String(r['COD. SETOR']||'').match(/\d+/); return m ? parseInt(m[0],10) : 0; }
+
 function passaVisao(setor){
   const v = el.visao.value;
   if (v==='todos') return true;
@@ -262,10 +237,8 @@ function prepara(){
   });
 }
 
-/* ---------- Cálculo ---------- */
 function emptyCat(){ return {volDia:0,buffer:0,volHE:0,volBees:0,volBoni:0,boniDia:0,boniMes:0,fat:0,faltaHecto:0,faltaFat:0}; }
 
-// Classifica cada linha do dia: venda, buffer, bonif ou falta
 function itensDoDia(){
   const d = el.data.value, out = [];
   state.cora.forEach(r=>{
@@ -316,9 +289,7 @@ function build(itens){
     }
   });
 
-  // Bonificado do mês (030237): todas as linhas do mês; em visão filtrada, só pedidos cujo setor é conhecido
   if (state.boni){
-    // Só filtra a 030237 por unidade se a coluna REVENDA trouxer os códigos das unidades
     const codsU = CONFIG.unidades.map(u=>chave(u.cod));
     const boniTemUnidade = state.boni.some(r=>codsU.includes(chave(r['REVENDA'])));
     state.boni.forEach(r=>{
@@ -343,12 +314,12 @@ function build(itens){
   };
 }
 
-// Volume por setor, separado por categoria (sempre todos os setores)
 function novoAcc(){
   const a = {volDia:0, buffer:0, he:0};
   CATS.concat('OUTROS').forEach(c=>{ a['d_'+c]=0; a['b_'+c]=0; });
   return a;
 }
+
 function porSetor(itens){
   const S = {};
   itens.forEach(it=>{
@@ -360,7 +331,6 @@ function porSetor(itens){
   return S;
 }
 
-/* ---------- Formatação ---------- */
 const f1 = new Intl.NumberFormat('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
 const f2 = new Intl.NumberFormat('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const vol = v => f1.format(v||0);
@@ -368,26 +338,25 @@ const pct = v => Math.round(v||0)+'%';
 const money = (v,dash) => '<div class="money"><span>R$</span><span>'+((dash && !v)?'-':f2.format(v||0))+'</span></div>';
 const dataBR = s => s.split('-').reverse().join('/');
 
-/* ---------- Renderização ---------- */
 function volRow(label, a, cls, dash, cols, base){
   const f = x => dash ? '-' : vol(x);
   const catCells = cols.map(c=>'<td>'+f(base==='tt' ? a['d_'+c]+a['b_'+c] : a['d_'+c])+'</td>').join('');
   return '<tr class="'+cls+'"><td class="lbl">'+label+'</td><td class="b">'+f(a.volDia+a.buffer)+'</td><td>'+f(a.volDia)+
     '</td><td class="g">'+f(a.buffer)+'</td>'+catCells+'<td class="b">'+f(a.he)+'</td></tr>';
 }
+
 function secGvSetor(itens){
-  // "Todas": uma tabela por unidade, porque o mesmo número de setor existe nas duas
   if (itens && el.unidade.value==='todas')
     return CONFIG.unidades.map(u=>blocoGvSetor(itens.filter(it=>it.un===chave(u.cod)), u.gvs, u.nome)).join('');
   const u = unidadeAtual() || CONFIG.unidades[0];
   return blocoGvSetor(itens, u.gvs, itens && el.unidade.value==='todas' ? u.nome : null);
 }
+
 function blocoGvSetor(itens, gvs, titulo){
   const base = el.basecat.value, dash = !itens;
   const S = dash ? {} : porSetor(itens);
   const Z = novoAcc;
   const soma = (A,B) => { Object.keys(A).forEach(k=>A[k]+=B[k]||0); return A; };
-  // Linha OUTROS só aparece se existir volume sem categoria
   const temOutros = Object.values(S).some(a=>a.d_OUTROS||a.b_OUTROS);
   const cols = temOutros ? CATS.concat('OUTROS') : CATS.slice();
   let rows = '', total = Z();
@@ -408,7 +377,7 @@ function blocoGvSetor(itens, gvs, titulo){
   const thCat = cols.map(c=>'<th style="background:var(--slate)">'+c+'</th>').join('');
   return '<div class="sec"><div class="bar full">VOLUME POR GV E SETOR'+(titulo?' — '+titulo:'')+' — CATEGORIAS EM '+(base==='tt'?'VOL TT (DIA + BUFFER)':'VOL DIA')+'</div>'+
     '<table><thead><tr><th style="background:none"></th><th>VOL TT</th><th>VOL DIA</th><th>BUFFER</th>'+thCat+'<th>VENDA HE</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    (dash?'<p class="aviso">Carregue o Cora Pedidos (e a BASE) para ver o volume por GV e setor.</p>':'')+'</div>';
+    (dash?'<p class="aviso">Sem dados para exibir.</p>':'')+'</div>';
 }
 
 function render(m, itens){
@@ -482,34 +451,12 @@ function render(m, itens){
     '<div class="sec"><div class="bar red" style="margin-left:118px">FALTA DE PRODUTO</div><div class="grid2 f"><div>'+falta+'</div><div>'+rank+'</div></div></div>';
 }
 
-/* ---------- Conferência dos dados ---------- */
 function diagnostico(itens){
   if (!state.cora || !state.cora.length){ el.diag.textContent='Sem arquivo carregado.'; return; }
-  const campos = ['COD. UNIDADE VENDA','SITUACAO PEDIDO','TIPO PEDIDO','DESC. TIPO MOVIMENTO','TIPO BUFFER','CANAL ORIGEM',
-                  'SITUACAO ATEND. ITEM','FORMA DE PAGAMENTO','COD. SETOR'];
   let out = 'Linhas no Cora Pedidos: '+state.cora.length+(state.base?'   |   BASE: '+state.base.prod.size+' produtos':'   |   BASE não carregada')+'\n';
-  const faltam = ['DATA ENTREGA','COD. PRODUTO','COD. SETOR',CONFIG.campoHecto,CONFIG.campoValor,'VALOR LIQUIDO ITEM'].filter(c=>!(c in state.cora[0]));
-  if (faltam.length) out += 'ATENÇÃO — colunas não encontradas: '+faltam.join(', ')+'\n';
-  campos.forEach(c=>{
-    if (!(c in state.cora[0])) { out += '\n'+c+': (coluna não encontrada)\n'; return; }
-    const n={}; state.cora.forEach(r=>{ const v=r[c]||'(vazio)'; n[v]=(n[v]||0)+1; });
-    const lim = c==='COD. SETOR' ? 40 : 12;
-    out += '\n'+c+':\n'+Object.entries(n).sort((a,b)=>b[1]-a[1]).slice(0,lim).map(e=>'  '+e[0]+'  ['+e[1]+']').join('\n')+'\n';
-  });
-  if (itens){
-    const porCat = {}; itens.forEach(it=>{ porCat[it.cat]=(porCat[it.cat]||0)+1; });
-    out += '\nLinhas do dia por categoria: '+JSON.stringify(porCat)+'\n';
-    const sem = {}; itens.filter(it=>it.cat==='OUTROS').forEach(it=>{
-      const k=(it.r['COD. PRODUTO']||'')+' - '+(it.r['DESC. PRODUTO']||'');
-      sem[k]=(sem[k]||0)+it.h;
-    });
-    const lista = Object.entries(sem).sort((a,b)=>b[1]-a[1]).slice(0,10);
-    if (lista.length) out += '\nProdutos sem categoria (caem em OUTROS), maiores volumes:\n'+lista.map(e=>'  '+e[0]+'  ['+f1.format(e[1])+' hl]').join('\n')+'\n';
-  }
   el.diag.textContent = out;
 }
 
-/* ---------- Fluxo ---------- */
 function atualizar(){
   const demo = !state.cora;
   el.visao.disabled = el.basecat.disabled = el.unidade.disabled = demo;
@@ -518,50 +465,32 @@ function atualizar(){
   render(build(itens), itens);
   diagnostico(itens);
 }
+
 function setStatus(){
-  const p = [];
-  if (state.cora) p.push('Cora: '+state.cora.length+' linhas');
-  if (state.base) p.push('BASE ok');
-  if (state.boni) p.push('030237 ok');
-  const temMarca = state.cora && state.cora.length && ('TIPO MARCA' in state.cora[0]);
-  const ok = !!state.cora && (state.base || temMarca);
-  el.status.className = 'chip'+(ok?' ok':'');
-  el.status.textContent = !state.cora ? 'Dados de demonstração'
-    : p.join(' · ') + (ok ? '' : ' — falta a BASE (categorias)');
+  const partes = [];
+  partes.push(state.statusLeitura.cora ? 'Cora: Lido ✔' : 'Cora: Erro ❌');
+  partes.push(state.statusLeitura.base ? 'BASE: Lido ✔' : 'BASE: Erro ❌');
+  partes.push(state.statusLeitura.boni ? '03.02.37: Lido ✔' : '03.02.37: Erro ❌');
+
+  const tudoOk = state.statusLeitura.cora && state.statusLeitura.base;
+  el.status.className = 'chip ' + (tudoOk ? 'ok' : 'err');
+  el.status.textContent = partes.join(' · ');
 }
-async function lerBuf(file){ return decode(await file.arrayBuffer()); }
+
 function definirDataPadrao(){
   const ds = state.cora.map(r=>iso(r['DATA ENTREGA'])).filter(Boolean).sort();
   if (ds.length) el.data.value = ds[ds.length-1];
 }
+
 function definirUnidadePadrao(){
-  // Se o arquivo tem só uma das unidades conhecidas, já seleciona ela; senão mostra todas
   const achadas = CONFIG.unidades.filter(u=>state.cora.some(r=>chave(r['COD. UNIDADE VENDA'])===chave(u.cod)));
   el.unidade.value = achadas.length===1 ? achadas[0].cod : 'todas';
   montarVisao();
 }
-function aplicar(novaData){
-  prepara();
-  if (novaData && state.cora){ definirDataPadrao(); definirUnidadePadrao(); }
-  setStatus(); atualizar();
-}
 
-document.getElementById('fCora').addEventListener('change', async e=>{
-  if (!e.target.files[0]) return;
-  state.cora = parseCSV(await lerBuf(e.target.files[0])); aplicar(true);
-});
-document.getElementById('fBase').addEventListener('change', async e=>{
-  if (!e.target.files[0]) return;
-  state.base = buildBase(parseRows(await lerBuf(e.target.files[0]))); aplicar(false);
-});
-document.getElementById('fBoni').addEventListener('change', async e=>{
-  if (!e.target.files[0]) return;
-  state.boni = parseCSV(await lerBuf(e.target.files[0])); aplicar(false);
-});
 [el.data, el.visao, el.basecat].forEach(x=>x.addEventListener('change', atualizar));
 el.unidade.addEventListener('change', ()=>{ montarVisao(); atualizar(); });
 
-/* Opções dos filtros */
 (function montarFiltros(){
   el.unidade.innerHTML = '<option value="todas">Todas</option>' +
     CONFIG.unidades.map(u=>'<option value="'+u.cod+'">'+u.nome+' ('+u.cod+')</option>').join('');
@@ -569,20 +498,44 @@ el.unidade.addEventListener('change', ()=>{ montarVisao(); atualizar(); });
   montarVisao();
 })();
 
-// Carga automática (carrega diretamente os ficheiros da raiz do servidor)
 (async function init(){
   el.data.value = DEMO.data;
   atualizar();
+
+  // Ler Cora Pedidos
   try {
     const r1 = await fetch(CONFIG.arquivoCora, {cache:'no-store'});
-    if (!r1.ok) return;
-    state.cora = parseCSV(decode(await r1.arrayBuffer()));
-    try { const r = await fetch(CONFIG.arquivoBase, {cache:'no-store'});
-          if (r.ok) state.base = buildBase(parseRows(decode(await r.arrayBuffer()))); } catch(e){}
-    try { const r = await fetch(CONFIG.arquivoBoni, {cache:'no-store'});
-          if (r.ok) state.boni = parseCSV(decode(await r.arrayBuffer())); } catch(e){}
-    aplicar(true);
-  } catch(e){ /* sem arquivos na pasta: segue na demonstração */ }
+    if (r1.ok) {
+      state.cora = parseCSV(decode(await r1.arrayBuffer()));
+      state.statusLeitura.cora = true;
+    }
+  } catch(e){}
+
+  // Ler Base
+  try {
+    const r2 = await fetch(CONFIG.arquivoBase, {cache:'no-store'});
+    if (r2.ok) {
+      state.base = buildBase(parseRows(decode(await r2.arrayBuffer())));
+      state.statusLeitura.base = true;
+    }
+  } catch(e){}
+
+  // Ler Bonificação (03.02.37)
+  try {
+    const r3 = await fetch(CONFIG.arquivoBoni, {cache:'no-store'});
+    if (r3.ok) {
+      state.boni = parseCSV(decode(await r3.arrayBuffer()));
+      state.statusLeitura.boni = true;
+    }
+  } catch(e){}
+
+  prepara();
+  if (state.cora && state.cora.length) {
+    definirDataPadrao();
+    definirUnidadePadrao();
+  }
+  setStatus();
+  atualizar();
 })();
 </script>
 </body>
