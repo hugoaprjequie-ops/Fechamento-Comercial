@@ -88,10 +88,10 @@ const CONFIG = {
     {cod:'1043293', nome:'GP7 - ITAPETINGA', gvs:[ {nome:'GV 1', de:101, ate:110} ]}
   ],
 
-  // Carregados automaticamente se estiverem nesta pasta (quando o HTML estiver num servidor)
-  arquivoCora: 'dados/cora_pedidos.csv',
-  arquivoBoni: 'dados/030237.csv',
-  arquivoBase: 'dados/base.csv',
+  // Ficheiros carregados automaticamente da raiz do servidor/GitHub
+  arquivoCora: 'Pedidos_1027247.csv',
+  arquivoBoni: '03.02.37_1027247.csv',
+  arquivoBase: 'Base.csv',
 
   campoHecto: 'VOLUME HECTOLITRO',
   campoValor: 'VALOR TOTAL',             // faturamento (com ADF)
@@ -569,7 +569,7 @@ el.unidade.addEventListener('change', ()=>{ montarVisao(); atualizar(); });
   montarVisao();
 })();
 
-// Carga automática (quando o HTML estiver publicado num servidor com a pasta dados/)
+// Carga automática (carrega diretamente os ficheiros da raiz do servidor)
 (async function init(){
   el.data.value = DEMO.data;
   atualizar();
